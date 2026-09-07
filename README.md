@@ -79,7 +79,7 @@ claude
 ```bash
 claude mcp add echoloop \
   -e TELEGRAM_BOT_TOKEN=... -e TELEGRAM_CHAT_ID=... \
-  -- node /path/to/EchoLoop/dist/index.js
+  -- node /path/to/EchoLoopMCP/dist/index.js
 ```
 
 `ask`의 대기 시간이 클라이언트 기본 타임아웃보다 길면 `MCP_TOOL_TIMEOUT`을 함께 올린다.
