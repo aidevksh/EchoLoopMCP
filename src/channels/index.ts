@@ -4,10 +4,8 @@ export interface Channel {
   /** False for channels that can only push (Discord webhooks). */
   readonly canReceive: boolean;
   send(text: string): Promise<void>;
-  /** Drop inbound messages already queued, so a following wait only sees fresh replies. */
-  drain(): Promise<void>;
-  /** First reply text, or null if `deadline` (epoch ms) passes first. */
-  waitForReply(deadline: number): Promise<string | null>;
+  /** Send a question and return its reply, or null when the timeout expires. */
+  ask(text: string, timeoutSec: number): Promise<string | null>;
 }
 
 import { TelegramChannel } from "./telegram.js";

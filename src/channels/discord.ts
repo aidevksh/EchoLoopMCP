@@ -40,6 +40,12 @@ export class DiscordBotChannel implements Channel {
     this.after = snowflakeFor(Date.now());
   }
 
+  async ask(text: string, timeoutSec: number): Promise<string | null> {
+    await this.drain();
+    await this.send(text);
+    return this.waitForReply(Date.now() + timeoutSec * 1000);
+  }
+
   async waitForReply(deadline: number): Promise<string | null> {
     for (;;) {
       // Newest first; walk it back to chronological order.
@@ -98,9 +104,7 @@ export class DiscordWebhookChannel implements Channel {
     }
   }
 
-  async drain(): Promise<void> {}
-
-  async waitForReply(): Promise<string | null> {
+  async ask(): Promise<string | null> {
     throw new Error("A Discord webhook cannot receive replies. Configure DISCORD_BOT_TOKEN + DISCORD_CHANNEL_ID for two-way use.");
   }
 }

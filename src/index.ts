@@ -51,7 +51,8 @@ server.registerTool(
     description:
       "Push a message to the user's phone and then block until they reply, returning their reply text. " +
       "Use it instead of ending your turn when the user is away from the terminal and you need their next instruction or a decision. " +
-      "Treat the returned text as the user's next instruction. Replies sent before this call are ignored.",
+      "Treat the returned text as the user's next instruction. Replies sent before this call are ignored. " +
+      "On Telegram, use Reply on this question's message to route the answer to this call.",
     inputSchema: {
       message: z
         .string()
@@ -78,9 +79,6 @@ server.registerTool(
     let heartbeat: NodeJS.Timeout | undefined;
 
     try {
-      await channel.drain();
-      await channel.send(message);
-
       if (progressToken !== undefined) {
         const startedAt = Date.now();
         heartbeat = setInterval(() => {
@@ -98,7 +96,7 @@ server.registerTool(
         }, HEARTBEAT_MS);
       }
 
-      const reply = await channel.waitForReply(Date.now() + timeoutSec * 1000);
+      const reply = await channel.ask(message, timeoutSec);
       return reply === null
         ? ok(`No reply within ${timeoutSec}s. The user has not answered yet.`)
         : ok(reply);
