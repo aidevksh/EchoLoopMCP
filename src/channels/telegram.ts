@@ -12,7 +12,7 @@ interface Update {
   update_id: number;
   message?: {
     text?: string;
-    chat: { id: number };
+    chat: { id: number; type?: string };
     reply_to_message?: { message_id: number; text?: string; from?: { id: number } };
   };
 }
@@ -28,6 +28,7 @@ interface State {
   routes?: Record<string, string>;
   inbox?: ThreadReply[];
   previousNotifications?: Record<string, string>;
+  pairing?: { code: string; deadline: number; chatId?: string };
 }
 
 export interface ThreadReply {
@@ -51,6 +52,34 @@ export class TelegramChannel implements Channel {
 
   get label(): string {
     return `Telegram (chat ${this.chatId})`;
+  }
+
+  async botUsername(): Promise<string> {
+    const bot = await this.call<{ username: string }>("getMe", {}, 0);
+    const webhook = await this.call<{ url: string }>("getWebhookInfo", {}, 0);
+    if (webhook.url) throw new Error("This bot has a webhook. Remove it before connecting EchoLoop.");
+    return bot.username;
+  }
+
+  async discoverChat(code: string, timeoutSec = 120): Promise<string | null> {
+    const deadline = Date.now() + timeoutSec * 1000;
+    await this.withState(async (state) => {
+      if (state.pairing && state.pairing.deadline > Date.now()) throw new Error("Another setup is already pairing this bot.");
+      state.pairing = { code, deadline };
+    });
+    try {
+      while (Date.now() < deadline) {
+        const chatId = await this.withState(async (state) => {
+          if (!state.pairing?.chatId) await this.poll(state, 1);
+          return state.pairing?.chatId ?? null;
+        });
+        if (chatId) return chatId;
+        await sleep(100);
+      }
+      return null;
+    } finally {
+      await this.withState(async (state) => { if (state.pairing?.code === code) delete state.pairing; });
+    }
   }
 
   async send(text: string): Promise<void> {
@@ -128,6 +157,10 @@ export class TelegramChannel implements Channel {
     for (const update of updates) {
       if (update.update_id < state.offset) continue;
       const message = update.message;
+      if (state.pairing && state.pairing.deadline > Date.now() &&
+          message?.chat.type === "private" && message.text === `/start ${state.pairing.code}`) {
+        state.pairing.chatId ??= String(message.chat.id);
+      }
       if (message?.text && message.reply_to_message) {
         const key = `${message.chat.id}:${message.reply_to_message.message_id}`;
         const target = state.pending[key];

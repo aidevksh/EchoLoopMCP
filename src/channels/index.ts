@@ -10,6 +10,9 @@ export interface Channel {
 
 import { TelegramChannel } from "./telegram.js";
 import { DiscordBotChannel, DiscordWebhookChannel } from "./discord.js";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 export const DEFAULT_TIMEOUT_SEC = Number(process.env.ECHOLOOP_TIMEOUT ?? 240);
 
@@ -24,7 +27,16 @@ const SETUP_HELP = `EchoLoop has no channel configured. Set one of:
 
 /** Pick a channel from whichever credentials are present. */
 export function createChannel(): Channel {
-  const env = process.env;
+  const env = { ...process.env };
+  if (!env.TELEGRAM_BOT_TOKEN && !env.TELEGRAM_CHAT_ID && !env.DISCORD_BOT_TOKEN && !env.DISCORD_WEBHOOK_URL) {
+    try {
+      const saved = JSON.parse(readFileSync(join(homedir(), ".echoloop", "config.json"), "utf8"));
+      env.TELEGRAM_BOT_TOKEN = saved.telegram?.token;
+      env.TELEGRAM_CHAT_ID = saved.telegram?.chatId;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
   const prefer = env.ECHOLOOP_CHANNEL?.toLowerCase();
 
   const telegram =

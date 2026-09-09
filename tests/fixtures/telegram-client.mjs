@@ -20,6 +20,7 @@ process.on("message", async (message) => {
       if (message.type === "ask") reply = await channel.ask(message.text, message.timeout ?? 5);
       if (message.type === "sendToThread") await channel.sendToThread(message.text, message.threadId);
       if (message.type === "registerPreviousNotifications") await channel.registerPreviousNotifications(message.texts, message.threadId);
+      if (message.type === "discoverChat") reply = await channel.discoverChat(message.code, message.timeout ?? 5);
       if (message.type === "receiveThreadReplies") reply = await channel.receiveThreadReplies();
       if (message.type === "acknowledgeThreadReply") await channel.acknowledgeThreadReply(message.updateId);
       process.send({ type: "result", reply });

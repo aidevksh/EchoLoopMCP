@@ -44,6 +44,16 @@ const update = (id, target, text, chat = 123) => ({
   message: { text, chat: { id: chat }, ...(target ? { reply_to_message: { message_id: target } } : {}) },
 });
 
+test("setup discovers only the private chat using the current pairing code", { timeout: 15000 }, async (t) => {
+  const client = await harness(t, async () => ({ ok: true, result: [
+    { update_id: 1, message: { text: "/start", chat: { id: 1, type: "private" } } },
+    { update_id: 2, message: { text: "/start old-code", chat: { id: 2, type: "private" } } },
+    { update_id: 3, message: { text: "/start new-code", chat: { id: 3, type: "group" } } },
+    { update_id: 4, message: { text: "/start new-code", chat: { id: 456, type: "private" } } },
+  ] }));
+  assert.deepEqual(await client()({ type: "discoverChat", code: "new-code" }), { type: "result", reply: "456" });
+});
+
 test("replies to previous notifications route only when the original author is our bot", { timeout: 15000 }, async (t) => {
   const client = await harness(t, async () => ({ ok: true, result: [
     { update_id: 1, message: { text: "spoof", chat: { id: 123 },

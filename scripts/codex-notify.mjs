@@ -2,9 +2,10 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rmdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TelegramChannel } from "../dist/channels/telegram.js";
+import { projectEnabled, readSettings, telegramCredentials } from "./settings.mjs";
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const stateDirectory = join(homedir(), ".echoloop", "codex-notify");
@@ -17,24 +18,24 @@ async function ensureReplyReceiver() {
     return;
   } catch { /* Start a receiver if the previous process is no longer running. */ }
   const settings = JSON.parse(await readFile(join(directory, "settings.json"), "utf8"));
-  const child = spawn(process.execPath, [`--env-file=${join(project, ".env")}`,
-    join(project, "scripts", "codex-replies.mjs"), settings.codex], {
+  const child = spawn(process.execPath, [join(project, "scripts", "codex-replies.mjs"), settings.codex, ...(settings.codexArgs ?? [])], {
     detached: true, stdio: "ignore", windowsHide: true,
   });
   child.on("error", () => {});
   child.unref();
 }
 
-export function notificationText(event) {
+export function notificationText(event, settings) {
   if (event.type !== "agent-turn-complete" || !event.cwd ||
-      resolve(event.cwd).toLowerCase() !== project.toLowerCase()) return null;
+      !projectEnabled(settings, event.cwd)) return null;
   const text = event["last-assistant-message"];
   if (typeof text !== "string" || !text.trim()) return null;
-  return `[EchoLoop · ${(event["thread-id"] ?? "").slice(-8)}]\n${text}`;
+  return `[${basename(event.cwd)} · ${(event["thread-id"] ?? "").slice(-8)}]\n${text}`;
 }
 
 export async function forward(event) {
-  const text = notificationText(event);
+  const settings = await readSettings();
+  const text = notificationText(event, settings);
   if (!text) return;
   await ensureReplyReceiver();
   await mkdir(stateDirectory, { recursive: true });
@@ -49,7 +50,8 @@ export async function forward(event) {
     throw error;
   }
   try {
-    const channel = new TelegramChannel(process.env.TELEGRAM_BOT_TOKEN, process.env.TELEGRAM_CHAT_ID);
+    const { token, chatId } = telegramCredentials(settings);
+    const channel = new TelegramChannel(token, chatId);
     await channel.sendToThread(text, event["thread-id"]);
     await writeFile(join(stateDirectory, "last-sent.json"), JSON.stringify({
       at: new Date().toISOString(), threadId: event["thread-id"], turnId: event["turn-id"],

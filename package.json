@@ -5,23 +5,29 @@
   "description": "MCP server that lets an agent ping you on Telegram/Discord and wait for your reply.",
   "type": "module",
   "bin": {
+    "echoloop": "scripts/echoloop.mjs",
     "echoloop-mcp": "dist/index.js"
   },
   "files": [
     "dist",
-    "scripts"
+    "scripts",
+    "README.ko.md",
+    "BACKLOG.md"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "test": "npm run build && node --test tests/*.test.mjs",
+    "test": "npm run build && node --test",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "postinstall": "node scripts/postinstall.mjs",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "proper-lockfile": "^4.1.2",
+    "smol-toml": "^1.8.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
