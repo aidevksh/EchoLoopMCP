@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, fork } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -73,7 +73,8 @@ test("setup exits on EOF or malformed token without saving credentials", async (
 
 for (const [choice, language] of [["1", "en"], ["2", "ko"]]) {
 test(`first setup (${language}) saves a discovered chat and installs the hook without exposing the token`, { timeout: 15000 }, async (t) => {
-  const home = await mkdtemp(join(tmpdir(), "echoloop-setup-"));
+  // macOS tmpdir() is under the /var -> /private/var symlink; setup and clients see the resolved cwd.
+  const home = await realpath(await mkdtemp(join(tmpdir(), "echoloop-setup-")));
   t.after(() => rm(home, { recursive: true, force: true }));
   const configDirectory = join(home, ".codex");
   await mkdir(configDirectory);
