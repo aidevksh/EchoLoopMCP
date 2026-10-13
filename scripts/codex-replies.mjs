@@ -6,6 +6,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import lockfile from "proper-lockfile";
 import { TelegramChannel } from "../dist/channels/telegram.js";
+import { appendLog } from "./log.mjs";
 import { readSettings, telegramCredentials } from "./settings.mjs";
 
 const run = promisify(execFile);
@@ -19,7 +20,8 @@ await writeFile(join(directory, "status.json"), JSON.stringify({ pid: process.pi
 try {
   for (;;) {
     try {
-      for (const reply of await channel.receiveThreadReplies()) {
+      // Claude sessions ("claude:<session>") consume their own replies from their Stop hook.
+      for (const reply of (await channel.receiveThreadReplies()).filter((item) => !item.threadId.startsWith("claude:"))) {
         await run(process.argv[2], [...process.argv.slice(3), "queue", "--thread", reply.threadId, "--message",
           `[텔레그램 답장 · ${reply.updateId}]\n${reply.text}`], { windowsHide: true, timeout: 30_000 });
         await channel.acknowledgeThreadReply(reply.updateId);
@@ -28,8 +30,9 @@ try {
           at: new Date().toISOString(),
         }));
       }
-    } catch {
+    } catch (error) {
       // Leave unsubmitted replies in the durable inbox for a later retry.
+      await appendLog("codex-replies", `retrying: ${error?.message ?? error}`);
       await writeFile(join(directory, "status.json"), JSON.stringify({ pid: process.pid, status: "retrying" }));
       await sleep(5000);
     }

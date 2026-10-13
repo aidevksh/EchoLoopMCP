@@ -155,3 +155,87 @@ test("a failed send releases the shared lock for another ask", { timeout: 15000 
   assert.match((await ask("fails")).error, /test failure/);
   assert.deepEqual(await ask("works"), { type: "result", reply: "recovered" });
 });
+
+test("transient Telegram and network failures are retried without ending the wait", { timeout: 15000 }, async (t) => {
+  const failures = [
+    { ok: false, error_code: 502, description: "Bad Gateway" },
+    { throw: "fetch failed" },
+    { ok: false, error_code: 429, description: "Too Many Requests", parameters: { retry_after: 1 } },
+  ];
+  const client = await harness(t, async ({ method }) => method === "sendMessage"
+    ? { ok: true, result: { message_id: 7 } }
+    : failures.shift() ?? { ok: true, result: [update(1, 7, "still delivered")] });
+  assert.deepEqual(await client()("question", 10), { type: "result", reply: "still delivered" });
+});
+
+const threadServer = (start, updates) => async ({ method, params }) => method === "sendMessage"
+  ? { ok: true, result: { message_id: start++ } }
+  : { ok: true, result: updates().filter((item) => item.update_id >= params.offset) };
+
+test("a newer wait for a session ends the older one and still gets replies to older notifications", { timeout: 15000 }, async (t) => {
+  let updates = [];
+  const client = await harness(t, threadServer(20, () => updates));
+  const older = client();
+  const newer = client();
+  await older({ type: "sendToThread", text: "turn 1", threadId: "claude:s", options: { forceReply: true } });
+  const olderWait = older({ type: "waitForThread", threadId: "claude:s", timeout: 10 });
+  await sleep(500);
+  await newer({ type: "sendToThread", text: "turn 2", threadId: "claude:s", options: { forceReply: true } });
+  const newerWait = newer({ type: "waitForThread", threadId: "claude:s", timeout: 10 });
+  assert.deepEqual(await olderWait, { type: "result", reply: null });
+  updates = [update(1, 20, "reply to the turn 1 notification")];
+  assert.deepEqual(await newerWait, { type: "result", reply: ["reply to the turn 1 notification"] });
+});
+
+test("every reply to a session's notifications and quick plain follow-ups reach that session", { timeout: 15000 }, async (t) => {
+  let updates = [];
+  const hook = (await harness(t, threadServer(30, () => updates)))();
+  await hook({ type: "sendToThread", text: "turn 1", threadId: "claude:s" });
+  await hook({ type: "sendToThread", text: "turn 2", threadId: "claude:s" });
+  updates = [update(1, 31, "first"), update(2, 30, "second, to the older notification"), update(3, null, "third, plain follow-up")];
+  assert.deepEqual(await hook({ type: "waitForThread", threadId: "claude:s" }),
+    { type: "result", reply: ["first", "second, to the older notification", "third, plain follow-up"] });
+  updates.push(update(4, null, "fourth, sent while the session worked"));
+  assert.deepEqual(await hook({ type: "waitForThread", threadId: "claude:s" }),
+    { type: "result", reply: ["fourth, sent while the session worked"] });
+});
+
+test("a plain message after answering a question does not reach a session", { timeout: 15000 }, async (t) => {
+  let messageId = 40;
+  let updates = [];
+  const call = (await harness(t, async ({ method, params }) => {
+    if (method !== "sendMessage") return { ok: true, result: updates.filter((item) => item.update_id >= params.offset) };
+    if (params.text === "question") updates = [update(1, 40, "go on"), update(2, 41, "1"), update(3, null, "unclear target")];
+    return { ok: true, result: { message_id: messageId++ } };
+  }))();
+  await call({ type: "sendToThread", text: "turn", threadId: "claude:s" });
+  assert.deepEqual(await call("question", 5), { type: "result", reply: "1" });
+  assert.deepEqual(await call({ type: "waitForThread", threadId: "claude:s", timeout: 2 }), { type: "result", reply: ["go on"] });
+  assert.deepEqual(await call({ type: "waitForThread", threadId: "claude:s", timeout: 1 }), { type: "result", reply: null });
+});
+
+test("many concurrent session waits share one poller and each gets its reply", { timeout: 20000 }, async (t) => {
+  const threads = ["a", "b", "c", "d", "e", "f"].map((name) => `claude:${name}`);
+  const sent = new Map();
+  let messageId = 50;
+  let activePolls = 0;
+  let maxPolls = 0;
+  let updates = [];
+  const client = await harness(t, async ({ method, params }) => {
+    if (method === "sendMessage") {
+      sent.set(params.text, messageId);
+      return { ok: true, result: { message_id: messageId++ } };
+    }
+    maxPolls = Math.max(maxPolls, ++activePolls);
+    await sleep(50);
+    activePolls--;
+    return { ok: true, result: updates.filter((item) => item.update_id >= params.offset) };
+  });
+  const hooks = threads.map(() => client());
+  await Promise.all(hooks.map((hook, i) => hook({ type: "sendToThread", text: threads[i], threadId: threads[i] })));
+  const waits = hooks.map((hook, i) => hook({ type: "waitForThread", threadId: threads[i], timeout: 15 }));
+  await sleep(500);
+  updates = threads.map((thread, i) => update(i + 1, sent.get(thread), `reply for ${thread}`));
+  assert.deepEqual(await Promise.all(waits), threads.map((thread) => ({ type: "result", reply: [`reply for ${thread}`] })));
+  assert.equal(maxPolls, 1);
+});

@@ -6,7 +6,7 @@ Receive AI results on Telegram and reply to the notification to continue the sam
 
 > [!IMPORTANT]
 > **When a result arrives, use Telegram’s Reply action on that notification to send your next instruction.**
-> EchoLoop uses the original notification to identify the AI session. With multiple sessions, reply to the notification for the intended session. A standalone message does not identify a session.
+> EchoLoop uses the original notification to identify the AI session. With multiple sessions, reply to the notification for the intended session. A standalone message sent within 10 minutes after such a reply goes to the same session; otherwise it does not identify a session.
 
 ![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-green)
 [![Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue)](LICENSE)
@@ -84,6 +84,8 @@ Subfolders inherit the nearest configured parent. An explicit OFF on a subfolder
 
 **Your instruction goes to the same AI session linked to that notification.** No `/echoloop` prefix is needed. Even when notifications from several sessions share one chat, the original message identifies the destination, so always reply to the intended notification.
 
+You can send more than one message. Replies to any notification of the same session, and standalone follow-up messages within 10 minutes of a reply, are queued for that session. Messages sent while the AI is working are delivered when it finishes; several queued messages are delivered together, numbered in order.
+
 For a selection question, reply with an option number, comma-separated numbers for multiple choices, or a free-text instruction. An unanswered or expired question never counts as approval.
 
 ## Client support and limits
@@ -95,7 +97,7 @@ For a selection question, reply with an option number, comma-separated numbers f
 | Ask the user to choose | MCP `choose` / `ask` | `AskUserQuestion` hook |
 | Native permission prompt | Remains local | PermissionRequest hook; explicit allow required |
 
-Codex must support `codex queue`; setup checks availability. Codex's MCP instructions request remote questions when enabled, but do not intercept every native client dialog. Claude Code must support exec-form hooks and `asyncRewake`. Keep its interactive session open; noninteractive `claude -p` is not supported for this completion/reply loop. Completion replies wait up to about 24 hours; selection and permission hooks wait up to nine minutes, then fall back to local interaction.
+Codex must support `codex queue`; setup checks availability. Codex's MCP instructions request remote questions when enabled, but do not intercept every native client dialog. Claude Code must support exec-form hooks and `asyncRewake`. Keep its interactive session open; noninteractive `claude -p` is not supported for this completion/reply loop. Completion replies wait up to about 24 hours; Claude Code keeps one wait per session, and messages queued longer than that are discarded. Selection and permission hooks wait up to nine minutes, then fall back to local interaction.
 
 Keep the computer awake and connected. EchoLoop does not install an OS boot service. Use one computer and one OS user per bot; another bot program or computer polling the same token can conflict. An existing Telegram webhook must be removed before pairing. Text replies are supported; Telegram messages longer than 4,096 characters are truncated.
 
@@ -113,7 +115,7 @@ flowchart LR
     M[MCP ask / choose] <--> T
 ```
 
-Telegram polling state is shared across local processes using a file lock. Original message IDs select the destination session. Codex replies stay in a persistent inbox until queue submission succeeds. Queue submission and local acknowledgement are separate operations, so a crash between them can cause duplicate delivery.
+Telegram polling state is shared across local processes using a file lock; one process at a time long-polls Telegram, and the others read the shared state. Original message IDs select the destination session. Codex replies stay in a persistent inbox until queue submission succeeds. Queue submission and local acknowledgement are separate operations, so a crash between them can cause duplicate delivery.
 
 ## Settings and troubleshooting
 
@@ -124,7 +126,8 @@ Setup updates Codex's `~/.codex/config.toml` (or `CODEX_HOME`) and Claude's `~/.
 - **No chat ID:** open the link from the current setup run and press Start, rather than sending a greeting. After timeout, rerun setup.
 - **No notification:** check `echoloop status` in the actual project folder, client availability on PATH, and restart the client after setup.
 - **No supported client found:** install Codex or Claude Code and rerun setup; the saved Telegram pairing is retained.
-- **Codex reply not delivered:** inspect `~/.echoloop/codex-replies/status.json`; recent send metadata is in `~/.echoloop/codex-notify/last-sent.json`.
+- **Claude reply not delivered:** errors are logged to `~/.echoloop/logs/claude-hook.log`.
+- **Codex reply not delivered:** inspect `~/.echoloop/codex-replies/status.json` and `~/.echoloop/logs/codex-replies.log`; recent send metadata is in `~/.echoloop/codex-notify/last-sent.json`.
 - **Reconfigure the bot:** stop connected clients/receivers, remove only the `telegram` entry from the settings JSON, then rerun setup. Keep project and language settings.
 
 ## MCP and manual transports
