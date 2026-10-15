@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rmdir, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { mkdir, readFile, readdir, rmdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { TelegramChannel } from "../dist/channels/telegram.js";
 import { projectEnabled, readSettings, telegramCredentials } from "./settings.mjs";
@@ -25,9 +27,41 @@ async function ensureReplyReceiver() {
   child.unref();
 }
 
-export function notificationText(event, settings) {
+export async function readSessionMetadata(threadId, codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex")) {
+  if (typeof threadId !== "string" || !threadId) return null;
+  for (const directory of ["sessions", "archived_sessions"]) {
+    const root = join(codexHome, directory);
+    let files;
+    try { files = await readdir(root, { recursive: true }); }
+    catch (error) {
+      if (error.code === "ENOENT") continue;
+      throw error;
+    }
+    const file = files.find((path) => path.endsWith(`-${threadId}.jsonl`));
+    if (!file) continue;
+    const stream = createReadStream(join(root, file), { encoding: "utf8" });
+    const lines = createInterface({ input: stream, crlfDelay: Infinity });
+    try {
+      for await (const line of lines) {
+        const record = JSON.parse(line);
+        return record.type === "session_meta" && record.payload?.id === threadId ? record.payload : null;
+      }
+    } finally {
+      lines.close();
+      stream.destroy();
+    }
+  }
+  return null;
+}
+
+export function notificationText(event, settings, session) {
   if (event.type !== "agent-turn-complete" || !event.cwd ||
       !projectEnabled(settings, event.cwd)) return null;
+  // Subagents and internal tasks also emit completion hooks, including their final reports to the parent.
+  if (!session || session.id !== event["thread-id"] ||
+      (session.thread_source && session.thread_source !== "user") || session.source === "subagent" ||
+      (session.source && typeof session.source === "object" &&
+        (Object.hasOwn(session.source, "subagent") || Object.hasOwn(session.source, "internal")))) return null;
   const text = event["last-assistant-message"];
   if (typeof text !== "string" || !text.trim()) return null;
   return `[${basename(event.cwd)} · ${(event["thread-id"] ?? "").slice(-8)}]\n${text}`;
@@ -35,7 +69,8 @@ export function notificationText(event, settings) {
 
 export async function forward(event) {
   const settings = await readSettings();
-  const text = notificationText(event, settings);
+  const session = await readSessionMetadata(event["thread-id"]);
+  const text = notificationText(event, settings, session);
   if (!text) return;
   await ensureReplyReceiver();
   await mkdir(stateDirectory, { recursive: true });

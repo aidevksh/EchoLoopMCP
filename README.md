@@ -99,6 +99,8 @@ For a selection question, reply with an option number, comma-separated numbers f
 
 Codex must support `codex queue`; setup checks availability. Codex's MCP instructions request remote questions when enabled, but do not intercept every native client dialog. Claude Code must support exec-form hooks and `asyncRewake`. Keep its interactive session open; noninteractive `claude -p` is not supported for this completion/reply loop. Completion replies wait up to about 24 hours; Claude Code keeps one wait per session, and messages queued longer than that are discarded. Selection and permission hooks wait up to nine minutes, then fall back to local interaction.
 
+Codex completion notifications require a matching local session record. Subagent reports, internal tasks, and completions without a session record are skipped; only the user's session sends its final answer.
+
 Keep the computer awake and connected. EchoLoop does not install an OS boot service. Use one computer and one OS user per bot; another bot program or computer polling the same token can conflict. An existing Telegram webhook must be removed before pairing. Text replies are supported; Telegram messages longer than 4,096 characters are truncated.
 
 ## Process structure
